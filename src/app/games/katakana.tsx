@@ -1,72 +1,104 @@
 "use client";
 import type {FlattenedOptions, Row} from "@/schema";
 
-import React, {useState} from "react";
+import React, {useCallback, useEffect, useState} from "react";
 
 import {cn} from "@/lib/utils";
 import {Button} from "@/components/ui/button";
 import {OPTIONS, flattenedRows} from "@/data/katakanas";
-import {flattenOptionsByRow, randomLetterWithoutRepeat, randomOption} from "@/lib/data-mutators";
+import {flattenOptionsByRow, randomLetterWithoutRepeat} from "@/lib/data-mutators";
 import {useStatus} from "@/hooks/use-status";
+import {useQueue} from "@/hooks/use-queue";
 
 const TIME_TO_LOSE = 10;
 
-export function KatakanaGame() {
-  const {state, ...stateControls} = useStatus();
+const useGameControls = () => {
+  const intervalRef = React.useRef<NodeJS.Timeout>();
+  const [timer, setTimer] = useState(0);
+  const [currentLetter, setCurrentLetter] = useState<FlattenedOptions[number]>();
+  const [currentOptions, setCurrentOptions] = useState<FlattenedOptions>([]);
+  const [configurationToGame, setConfigurationToGame] = useState({
+    type: "katakana" as "katakana" | "hiragana",
+    letters: null as Row[] | null,
+  });
   const [score, setScore] = useState(0);
-
-  const [currentLetter, setCurrentLetter] = useState<FlattenedOptions[number] | null>(null);
-  const [configurationToGame, setConfigurationToGame] = useState<{
-    letters: Row[] | null;
-    type: "hiragana" | "katakana";
-  }>({
-    letters: null,
-    type: "katakana",
+  const {state, ...stateControls} = useStatus();
+  const {addItem, queue, setMaxItems, resetQueue} = useQueue<FlattenedOptions[number]>([], {
+    maxItems: 5,
   });
 
-  const [currentOptions, setCurrentOptions] = useState<FlattenedOptions | null>(null);
-  const [timer, setTimer] = useState(0);
-  const intervalRef = React.useRef<NodeJS.Timeout>();
   const startGame = () => {
-    stateControls.startGame();
-    setScore(0);
-    setCurrentLetter(randomOption(flattenOptionsByRow(OPTIONS, configurationToGame.letters)));
     setTimer(0);
-    intervalRef.current && clearInterval(intervalRef.current);
+    const lettersToPlay = flattenOptionsByRow(OPTIONS, configurationToGame.letters);
+
+    setCurrentLetter(
+      randomLetterWithoutRepeat({
+        options: lettersToPlay,
+      }),
+    );
+    setCurrentOptions(lettersToPlay);
     intervalRef.current = setInterval(() => {
-      setTimer((timer) => timer + 1);
+      setTimer((p) => p + 1);
     }, 1000);
-    setCurrentOptions(flattenOptionsByRow(OPTIONS, configurationToGame.letters));
+
+    // set the max items to the half of the items to play
+    setMaxItems(Math.floor(lettersToPlay.length / 2));
+    stateControls.startGame();
   };
 
-  React.useEffect(() => {
-    if (timer >= TIME_TO_LOSE) {
-      stateControls.loseGame();
-      clearInterval(intervalRef.current);
-    }
-  }, [timer, stateControls]);
-
-  const handleAnswer = (answer: string) => {
-    if (currentLetter?.romaji === answer) {
-      setScore(score + 1);
+  const handleAnswer = (romaji: string) => {
+    if (currentLetter && currentLetter.romaji === romaji) {
+      setScore((p) => p + 1);
       setCurrentLetter(
-        randomLetterWithoutRepeat({
-          options: currentOptions ?? [],
-          currentLetter,
-        }),
+        randomLetterWithoutRepeat({currentLetter, options: currentOptions, prevOptions: queue}),
       );
       setTimer(0);
-      intervalRef.current && clearInterval(intervalRef.current);
-      intervalRef.current = setInterval(() => {
-        setTimer((timer) => timer + 1);
-      }, 1000);
-
-      return;
+      addItem(currentLetter);
     } else {
-      stateControls.loseGame();
       clearInterval(intervalRef.current);
+      loseGame();
     }
   };
+
+  const loseGame = useCallback(() => {
+    clearInterval(intervalRef.current);
+    stateControls.loseGame();
+    resetQueue();
+  }, [stateControls, resetQueue]);
+
+  const restartGame = () => {
+    clearInterval(intervalRef.current);
+    stateControls.resetGame();
+    resetQueue();
+  };
+
+  useEffect(() => {
+    if (timer >= TIME_TO_LOSE) {
+      loseGame();
+      setTimer(0);
+    }
+  }, [timer, loseGame]);
+
+  console.log(queue);
+  const game = {
+    configurationToGame,
+    setConfigurationToGame,
+    startGame,
+    handleAnswer,
+    loseGame,
+    state,
+    score,
+    timer,
+    currentLetter,
+    currentOptions,
+    restartGame,
+  };
+
+  return game;
+};
+
+export function KatakanaGame() {
+  const game = useGameControls();
 
   return (
     <div className="mx-auto flex max-w-screen-md flex-col items-center gap-4">
@@ -74,7 +106,7 @@ export function KatakanaGame() {
         <h2
           className={cn(
             "mb-2 flex flex-col items-center text-2xl font-medium",
-            state === "playing" && "blur-sm",
+            game.state === "playing" && "blur-sm",
           )}
         >
           <span>Japanusi Game</span>
@@ -88,18 +120,18 @@ export function KatakanaGame() {
           </a>
         </span>
       </div>
-      {state === "idle" && (
+      {game.state === "idle" && (
         <div className="flex flex-col items-center gap-6">
           <div className="flex gap-4">
             <div className="flex items-center gap-2">
               <input
-                checked={configurationToGame.type === "hiragana"}
+                checked={game.configurationToGame.type === "hiragana"}
                 id="hiragana"
                 name="type"
                 type="radio"
                 onChange={(e) =>
                   e.target.checked &&
-                  setConfigurationToGame((p) => ({
+                  game.setConfigurationToGame((p) => ({
                     ...p,
                     type: "hiragana",
                   }))
@@ -110,13 +142,13 @@ export function KatakanaGame() {
             </div>
             <div className="flex items-center gap-2">
               <input
-                checked={configurationToGame.type === "katakana"}
+                checked={game.configurationToGame.type === "katakana"}
                 id="katakana"
                 name="type"
                 type="radio"
                 onChange={(e) =>
                   e.target.checked &&
-                  setConfigurationToGame((p) => ({
+                  game.setConfigurationToGame((p) => ({
                     ...p,
                     type: "katakana",
                   }))
@@ -132,14 +164,14 @@ export function KatakanaGame() {
                 key={row}
                 type="button"
                 variant={
-                  configurationToGame.letters === null
+                  game.configurationToGame.letters === null
                     ? "default"
-                    : configurationToGame.letters.includes(row)
+                    : game.configurationToGame.letters.includes(row)
                       ? "default"
                       : "ghost"
                 }
                 onClick={() => {
-                  setConfigurationToGame((p) => ({
+                  game.setConfigurationToGame((p) => ({
                     ...p,
                     letters:
                       p.letters === null
@@ -154,45 +186,44 @@ export function KatakanaGame() {
               </Button>
             ))}
           </div>
-          <Button type="button" onClick={startGame}>
+          <Button type="button" onClick={game.startGame}>
             Start
           </Button>
         </div>
       )}
-      {state === "playing" && (
+      {game.state === "playing" && game.currentLetter ? (
         <div className="flex flex-col items-center">
-          <p className="text-gray-600">Score: {score}</p>
-          <p className="text-gray-600">Time: {TIME_TO_LOSE - timer}</p>
-          <p className="text-5xl font-bold">{currentLetter?.katakana}</p>
+          <p className="text-gray-600">Score: {game.score}</p>
+          <p className="text-gray-600">Time: {TIME_TO_LOSE - game.timer}</p>
+          <p className="text-5xl font-bold">{game.currentLetter[game.configurationToGame.type]}</p>
           <div className="my-4 flex flex-wrap items-center justify-center gap-2">
-            {currentOptions?.map((option) => (
+            {game.currentOptions.map((option) => (
               <Button
                 key={option.katakana}
                 type="button"
-                onClick={() => handleAnswer(option.romaji)}
+                onClick={() => game.handleAnswer(option.romaji)}
               >
                 {option.romaji}
               </Button>
             ))}
           </div>
         </div>
-      )}
-      {state === "lose" && (
+      ) : null}
+      {game.state === "lose" && (
         <div className="flex flex-col items-center gap-4">
           <p>Game over!</p>
-          <p>Score: {score}</p>
+          <p>Score: {game.score}</p>
           <div className="flex gap-2">
-            <Button type="button" onClick={startGame}>
+            <p>
+              The correct answer was:{" "}
+              <span className="font-bold">
+                {game.currentLetter ? game.currentLetter.romaji : ""}
+              </span>
+            </p>
+            <Button type="button" onClick={game.startGame}>
               Try again
             </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={() => {
-                stateControls.resetGame();
-                clearInterval(intervalRef.current);
-              }}
-            >
+            <Button type="button" variant="destructive" onClick={game.restartGame}>
               Back to menu
             </Button>
           </div>

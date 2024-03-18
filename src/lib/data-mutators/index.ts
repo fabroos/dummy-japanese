@@ -31,10 +31,17 @@ export const randomOption = (options: FlattenedOptions): FlattenedOptions[number
 export const randomLetterWithoutRepeat = ({
   currentLetter,
   options,
+  prevOptions,
 }: {
   currentLetter?: FlattenedOptions[number];
   options: FlattenedOptions;
+  prevOptions?: FlattenedOptions;
 }): FlattenedOptions[number] => {
+  options = prevOptions
+    ? options.filter(
+        (option) => !prevOptions.some((prevOption) => prevOption.romaji === option.romaji),
+      )
+    : options;
   const newLetter = randomOption(options);
 
   if (newLetter === currentLetter) {
