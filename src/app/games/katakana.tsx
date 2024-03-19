@@ -28,7 +28,10 @@ const useGameControls = () => {
   });
 
   const startGame = () => {
+    // reset values
     setTimer(0);
+    setScore(0);
+    clearInterval(intervalRef.current);
     const lettersToPlay = flattenOptionsByRow(OPTIONS, configurationToGame.letters);
 
     setCurrentLetter(
